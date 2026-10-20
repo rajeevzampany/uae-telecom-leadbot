@@ -50,9 +50,10 @@ def channel_for(url: str) -> str:
 
 
 # ---- Google News RSS (free, no key) -----------------------------------------
-def google_news(query: str) -> list[Candidate]:
-    q = urllib.parse.quote(f"{query} when:1d")
-    url = f"https://news.google.com/rss/search?q={q}&hl=en-AE&gl=AE&ceid=AE:en"
+def google_news(query: str, lang: str = "en") -> list[Candidate]:
+    q = urllib.parse.quote(f"{query} when:{config.NEWS_WINDOW}")
+    hl = "en-AE" if lang == "en" else lang
+    url = f"https://news.google.com/rss/search?q={q}&hl={hl}&gl=AE&ceid=AE:{lang}"
     _, xml_text = http.throttled_get(url, delay=1.5)
     return parse_google_news(xml_text)
 
@@ -138,9 +139,9 @@ def expand_listing_articles(cands: list[Candidate]) -> int:
 
 # ---- Search APIs for social + open web (last 24h) ----------------------------
 def web(query: str) -> list[Candidate]:
-    """Last-24h results from the configured search API (Brave preferred, Serper fallback)."""
+    """Recent results from the configured search API (Brave preferred, Serper fallback)."""
     return [Candidate(clean(r["title"]), clean(r["description"]), r["url"], channel_for(r["url"]))
-            for r in search.web_search(query, count=20, freshness="pd")]
+            for r in search.web_search(query, count=20, freshness=config.WEB_FRESHNESS)]
 
 
 def collect() -> list[Candidate]:
@@ -164,9 +165,9 @@ def collect() -> list[Candidate]:
     else:
         print("[web] no SERPER_API_KEY / BRAVE_API_KEY set - social channels skipped")
 
-    for q in config.NEWS_QUERIES:
+    for q, lang in [(q, "en") for q in config.NEWS_QUERIES] + [(q, "ar") for q in config.NEWS_QUERIES_AR]:
         try:
-            items += google_news(q)
+            items += google_news(q, lang)
         except Exception as e:  # one bad feed shouldn't kill the run
             print(f"[news] {q!r}: {e}")
 

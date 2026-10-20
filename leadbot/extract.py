@@ -6,19 +6,48 @@ import re
 from . import config, http
 from .sources import Candidate
 
-SYSTEM = """You qualify sales leads for a UAE B2B telecom provider selling business internet and fixed landlines.
+SYSTEM = """You track companies ENTERING OR EXPANDING IN THE UAE MARKET for a B2B telecom provider (business internet and landlines). Every new premises needs connectivity, so the goal is to spot them as early as possible - announced and coming-soon openings are the most valuable.
 
-You receive numbered news / social-media items from the last 24 hours. Identify every business that is NEWLY OPENING, OPENING SOON, or has JUST OPENED a physical premises in the UAE - e.g. offices, regional HQs, restaurants, cafes, retail stores, clinics, salons, gyms, hotels, schools, co-working spaces, warehouses, showrooms. New branches of existing brands count.
+You receive numbered news / social-media items (English or Arabic) from the last few days. Identify every business that has ANNOUNCED, is ABOUT TO OPEN, or has JUST OPENED a physical premises anywhere in the UAE - all seven emirates (Abu Dhabi incl. Al Ain, Dubai, Sharjah, Ajman, Ras Al Khaimah, Fujairah, Umm Al Quwain). Premises include offices, regional HQs, restaurants, cafes, retail stores, showrooms, malls, clinics, hospitals, schools, hotels, gyms, salons, co-working spaces, warehouses, factories and plants. New branches of existing brands count; a foreign company's first UAE location is the most important case.
 
-FREE ZONES matter: a company opening an office, HQ, branch, facility or warehouse in any UAE free zone (DMCC/JLT, DIFC, ADGM, JAFZA, DAFZ, Dubai Silicon Oasis, Dubai Internet/Media City, Dubai South, Meydan, IFZA, DWTC, Dubai Healthcare City, KEZAD, Masdar City, twofour54, SAIF Zone, Hamriyah, Shams, Ajman Free Zone, RAKEZ, Fujairah Creative City, UAQ FTZ, etc.) counts, including "X joins DMCC" / "X sets up in ADGM" / "DIFC welcomes X". Name the zone in "free_zone".
+FREE ZONES count: a company opening an office, HQ, branch, facility or warehouse in any UAE free zone (DMCC/JLT, DIFC, ADGM, JAFZA, DAFZ, Dubai Silicon Oasis, Dubai Internet/Media City, Dubai South, Meydan, IFZA, DWTC, Dubai Healthcare City, KEZAD, Masdar City, twofour54, SAIF Zone, Hamriyah, Shams, Ajman Free Zone, RAKEZ, Fujairah Creative City, UAQ FTZ, etc.), including "X joins DMCC" / "X sets up in ADGM" / "DIFC welcomes X".
 
-Exclude: residential real-estate launches, product/app/menu launches with no new premises, events and festivals, closures, openings outside the UAE, and government announcements that name no business. A listicle ("10 new restaurants in Dubai", Time Out "new openings this month") is fine - extract each named business separately with its own location. Exclude dining deals, brunch offers, and reviews/awards of venues that are not newly opened.
+Exclude: residential real-estate launches, product/app/menu launches with no new premises, events and festivals, closures, openings outside the UAE, government facilities (parks, roads, government offices), dining deals, brunch offers, and reviews/awards of venues that are not new. A listicle ("10 new restaurants", "openings this month") is fine - extract each named business separately.
 
-Use ONLY facts in the item text. Never guess phone numbers, emails or websites - use "" when absent.
+Use ONLY facts in the item text. Never guess - use "" when absent. Give company names in English (Latin script) when the item provides them; otherwise keep the Arabic name.
 
 Reply with ONLY a JSON array (no prose). Each element:
-{"item": <item number>, "company_name": "...", "business_type": "restaurant|cafe|office|retail|clinic|hotel|other", "location": "area, emirate", "free_zone": "zone name or empty", "website": "", "phone": "", "email": "", "confidence": <0.0-1.0 that this is a genuine new UAE premises>}
+{"item": <item number>, "company_name": "...", "sector": "short description, e.g. 'Restaurant - Japanese', 'Retail - jewellery', 'Financial services office', 'Logistics warehouse'", "business_type": "restaurant|cafe|office|retail|clinic|hotel|school|industrial|other", "stage": "Announced|Opening soon|Recently opened", "expected_opening": "date or period if stated, e.g. 'Q1 2027', 'November 2026', else ''", "new_to_uae": "Yes if this is the company's first UAE presence, No if it already operates in the UAE, else Unknown", "origin": "home country / HQ city if stated, else ''", "emirate": "one of the seven emirates, or ''", "location": "area, emirate", "free_zone": "zone name or ''", "website": "", "phone": "", "email": "", "confidence": <0.0-1.0 that this is a genuine new UAE premises>}
 Return [] if nothing qualifies."""
+
+
+def norm_stage(v) -> str:
+    v = str(v or "").lower()
+    if "announc" in v or "plan" in v:
+        return "Announced"
+    if "soon" in v or "upcoming" in v:
+        return "Opening soon"
+    if "open" in v:
+        return "Recently opened"
+    return ""
+
+
+def norm_yes_no(v) -> str:
+    v = str(v or "").strip().lower()
+    return "Yes" if v.startswith("y") else "No" if v.startswith("n") else "Unknown"
+
+
+def norm_emirate(v) -> str:
+    v = str(v or "").lower()
+    if "ain" in v.split() or "al ain" in v:
+        return "Abu Dhabi"
+    for e in config.EMIRATES:
+        if e.lower() in v or e.lower().replace(" ", "") in v.replace(" ", ""):
+            return e
+    for alias, e in (("rak", "Ras Al Khaimah"), ("uaq", "Umm Al Quwain"), ("abudhabi", "Abu Dhabi")):
+        if alias in v.replace(" ", ""):
+            return e
+    return ""
 
 
 def parse_json_array(text: str) -> list[dict]:
@@ -35,7 +64,7 @@ def parse_json_array(text: str) -> list[dict]:
 DETAIL_SYSTEM = """You read one news article and extract facts about ONE named UAE business from it.
 Use ONLY what the article states about that business - never guess, never use the publisher's or another venue's details.
 Reply with ONLY a JSON object:
-{"location": "most specific address/area + emirate, e.g. 'Gate Village 3, DIFC, Dubai' or ''", "free_zone": "UAE free zone name if the premises is in one, else ''", "website": "", "phone": "", "email": ""}"""
+{"location": "most specific address/area + emirate, e.g. 'Gate Village 3, DIFC, Dubai' or ''", "emirate": "", "free_zone": "UAE free zone name if the premises is in one, else ''", "stage": "Announced|Opening soon|Recently opened or ''", "expected_opening": "", "new_to_uae": "Yes|No|''", "origin": "", "sector": "", "website": "", "phone": "", "email": ""}"""
 
 
 def details_from_article(company: str, article: str) -> dict:
@@ -91,6 +120,12 @@ def extract_leads(cands: list[Candidate]) -> list[dict]:
             leads.append({
                 "company_name": name,
                 "business_type": str(r.get("business_type", "")),
+                "sector": str(r.get("sector", "")).strip(),
+                "stage": norm_stage(r.get("stage", "")),
+                "expected_opening": str(r.get("expected_opening", "")).strip(),
+                "new_to_uae": norm_yes_no(r.get("new_to_uae", "")),
+                "origin": str(r.get("origin", "")).strip(),
+                "emirate": norm_emirate(r.get("emirate", "")),
                 "location": str(r.get("location", "")).strip(),
                 "free_zone_hint": str(r.get("free_zone", "")).strip(),
                 "website": str(r.get("website", "")).strip(),

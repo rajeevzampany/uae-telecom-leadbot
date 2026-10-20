@@ -136,9 +136,16 @@ def enrich(lead: dict, budget: search.Budget | None = None) -> dict:
         d = extract.details_from_article(lead["company_name"], article)
         if d.get("location") and len(d["location"]) >= len(lead["location"]):
             lead["location"] = d["location"]
-        for f_src, f_dst in (("free_zone", "free_zone_hint"), ("website", "website")):
+        for f_src, f_dst in (("free_zone", "free_zone_hint"), ("website", "website"), ("sector", "sector"),
+                             ("expected_opening", "expected_opening"), ("origin", "origin")):
             if d.get(f_src) and not lead.get(f_dst):
                 lead[f_dst] = d[f_src]
+        if d.get("stage") and not lead.get("stage"):
+            lead["stage"] = extract.norm_stage(d["stage"])
+        if d.get("new_to_uae") and lead.get("new_to_uae", "Unknown") == "Unknown":
+            lead["new_to_uae"] = extract.norm_yes_no(d["new_to_uae"])
+        if d.get("emirate") and not lead.get("emirate"):
+            lead["emirate"] = extract.norm_emirate(d["emirate"])
         p, e = contacts.extract(f"{d.get('phone', '')} {d.get('email', '')} " + near_name(article, lead["company_name"]))
         phones += [x for x in p[:1] if x not in phones]
         emails += [x for x in e[:1] if x not in emails]
@@ -165,4 +172,6 @@ def enrich(lead: dict, budget: search.Budget | None = None) -> dict:
         website=website,
         location=clean_location(lead["location"]),
     )
+    if not lead.get("emirate"):
+        lead["emirate"] = extract.norm_emirate(lead["location"])
     return lead

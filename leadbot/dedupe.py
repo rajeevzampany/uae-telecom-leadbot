@@ -76,9 +76,12 @@ class Index:
     def add_lead(self, lead: dict, ident: int = -1):
         self.add(lead["company_name"], lead.get("website", ""), lead.get("email", ""), lead.get("phone", ""), ident)
 
-    def add_sheet_row(self, row: list[str]):
-        pad = row + [""] * 8
-        self.add(pad[1], pad[5], pad[3], pad[2])
+    def add_sheet_row(self, row: list[str], header: list[str]):
+        """Index a sheet row by column NAME, so older and newer sheet layouts both work."""
+        def col(name):
+            i = header.index(name) if name in header else -1
+            return row[i] if 0 <= i < len(row) else ""
+        self.add(col("COMPANY NAME"), col("WEBSITE"), col("EMAIL"), col("CONTACT NUMBER"))
 
     def match(self, lead: dict) -> int | None:
         if (s := norm_site(lead.get("website", ""))) and s in self.sites:
@@ -97,9 +100,12 @@ class Index:
 
 def merge_into(keep: dict, dup: dict):
     """Fill keep's blank fields from dup and remember dup's source."""
-    for f in ("phone", "email", "website", "location", "free_zone_hint", "business_type"):
+    for f in ("phone", "email", "website", "location", "free_zone_hint", "business_type", "sector", "stage",
+              "expected_opening", "origin", "emirate"):
         if not keep.get(f) and dup.get(f):
             keep[f] = dup[f]
+    if keep.get("new_to_uae", "Unknown") == "Unknown" and dup.get("new_to_uae") in ("Yes", "No"):
+        keep["new_to_uae"] = dup["new_to_uae"]
     if len(dup.get("location", "")) > len(keep.get("location", "")) and "," in dup.get("location", ""):
         keep["location"] = dup["location"]          # more specific location wins
     keep.setdefault("extra_sources", [])

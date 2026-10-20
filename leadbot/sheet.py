@@ -69,12 +69,21 @@ def open_worksheet():
             ws = sh.add_worksheet(config.WORKSHEET_NAME, rows=1000, cols=len(config.HEADERS))
 
     head = ws.row_values(1)
-    if head != config.HEADERS and (not head or head == config.HEADERS[:len(head)]):
-        # new sheet, or an older header missing newer columns (e.g. FREE ZONE) -> write full header
-        if ws.col_count < len(config.HEADERS):
-            ws.add_cols(len(config.HEADERS) - ws.col_count)
-        ws.update(range_name="A1", values=[config.HEADERS])
-        ws.freeze(rows=1)
+    if head != config.HEADERS:
+        has_data = len(ws.col_values(2)) > 1
+        if has_data and head != config.HEADERS[:len(head)]:
+            # existing rows in an older column layout: keep them, write new leads to a fresh tab
+            name = f"{config.WORKSHEET_NAME} (v2)"
+            try:
+                ws = sh.worksheet(name)
+            except gspread.WorksheetNotFound:
+                ws = sh.add_worksheet(name, rows=1000, cols=len(config.HEADERS))
+            head = ws.row_values(1)
+        if head != config.HEADERS:
+            if ws.col_count < len(config.HEADERS):
+                ws.add_cols(len(config.HEADERS) - ws.col_count)
+            ws.update(range_name="A1", values=[config.HEADERS])
+            ws.freeze(rows=1)
 
     ensure_reference_tab(sh, gspread)
     return ws
@@ -94,8 +103,9 @@ def ensure_reference_tab(sh, gspread):
     ref.freeze(rows=1)
 
 
-def existing_rows(ws) -> list[list[str]]:
-    return ws.get_all_values()[1:]
+def existing_rows(ws) -> tuple[list[str], list[list[str]]]:
+    values = ws.get_all_values()
+    return (values[0] if values else []), values[1:]
 
 
 def append(ws, rows: list[list[str]]):

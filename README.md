@@ -1,11 +1,18 @@
 # UAE Telecom Lead Bot
 
-Every morning at **08:00 Dubai time** this bot scans news and social media for businesses
-opening in the UAE, including **all major free zones**. It uses Claude to qualify them as B2B
-internet/landline prospects, finds published contact details, and appends new leads to a Google Sheet:
+Every morning at **08:00 Dubai time** this bot tracks **companies entering or expanding in the
+UAE market** — announced, opening-soon and just-opened premises across **all seven emirates**
+(plus Al Ain) and **39 free zones** — from English and Arabic news, social posts and city guides.
+Every new premises needs business internet and landlines. Claude qualifies each item, and the
+bot appends one row per company to a Google Sheet:
 
-| DATE | COMPANY NAME | CONTACT NUMBER | EMAIL | LOCATION | WEBSITE | SOURCE | FREE ZONE |
-|------|--------------|----------------|-------|----------|---------|--------|-----------|
+| DATE | COMPANY NAME | SECTOR | STAGE | EXPECTED OPENING | NEW TO UAE | ORIGIN | EMIRATE | LOCATION | FREE ZONE | WEBSITE | CONTACT NUMBER | EMAIL | SOURCE |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+
+- **STAGE**: Announced / Opening soon / Recently opened — earlier = more time to sell
+- **NEW TO UAE**: Yes = the company's first UAE presence (foreign brand entering the market)
+- Searches look back **7 days** each run (`NEWS_WINDOW`, `WEB_FRESHNESS`) so delayed indexing isn't missed;
+  items and companies already processed are skipped, so nothing repeats.
 
 A second tab, **Free Zone Directories**, lists each free zone with its official register / directory
 link so the sales team can verify a free-zone lead by hand.
@@ -16,7 +23,7 @@ link so the sales team can verify a free-zone lead by hand.
 Time Out Dubai / Abu Dhabi feeds (full articles)        ─┐
 Search API: Instagram / LinkedIn / Facebook / X / web   ├─► dedupe ─► Claude (qualify + extract + free zone)
   (35 queries incl. free-zone + Time Out site: queries)  │                │
-Google News RSS (56 UAE + free-zone + Time Out queries) ─┘                │
+Google News RSS (71 English + 12 Arabic queries)        ─┘                │
                                                                           ▼
               tag free zone ─► enrich (item text · source article · company website, robots.txt respected)
                                     ─► dedupe vs sheet ─► opt-out check ─► Google Sheet ─► Telegram summary
@@ -122,5 +129,5 @@ Env vars: `ANTHROPIC_MODEL` (default `claude-haiku-5-5`), `MIN_CONFIDENCE` (0.6)
 `MAX_CANDIDATES` (200/day), `REQUIRE_CONTACT` (`true` drops leads with no phone/email),
 `WORKSHEET_NAME` (`Leads`), `RETENTION_DAYS` (0 = keep).
 
-Daily volume: ~56 Google News feeds, 4 Time Out feeds, ~35 search-API queries (~1,050/month — check
-this against your Brave/Serper plan), 5–15 Haiku calls. A few cents a day.
+Daily volume: ~83 Google News feeds, ~35 search-API queries + up to `MAX_LOOKUPS` (40) enrichment
+searches (Brave: ~$5 free credit/month, then $5 per 1,000), 10–30 Haiku calls.

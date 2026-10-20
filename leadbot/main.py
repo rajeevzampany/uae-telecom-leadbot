@@ -17,6 +17,7 @@ def tag_free_zone(lead: dict):
 
 
 def build_row(today: str, lead: dict, zone) -> list[str]:
+    """One sheet row in config.HEADERS order."""
     src = lead["source"]
     url = lead.get("article_url") or src.url          # publisher's real URL when found
     location = lead["location"]
@@ -31,8 +32,17 @@ def build_row(today: str, lead: dict, zone) -> list[str]:
         source += f" | also in: {', '.join(dict.fromkeys(s.channel for s in extra))}"
     if zone:
         source += f" | verify: {zone.verify_url}"
-    return [today, lead["company_name"], lead["phone"], lead["email"], location,
-            lead["website"], source, zone.name if zone else ""]
+    emirate = lead.get("emirate") or (zone.emirate if zone else "")
+    values = {
+        "DATE": today, "COMPANY NAME": lead["company_name"],
+        "SECTOR": lead.get("sector") or (lead.get("business_type") or "").title(),
+        "STAGE": lead.get("stage", ""), "EXPECTED OPENING": lead.get("expected_opening", ""),
+        "NEW TO UAE": lead.get("new_to_uae", "Unknown"), "ORIGIN": lead.get("origin", ""),
+        "EMIRATE": emirate, "LOCATION": location, "FREE ZONE": zone.name if zone else "",
+        "WEBSITE": lead["website"], "CONTACT NUMBER": lead["phone"], "EMAIL": lead["email"],
+        "SOURCE": source,
+    }
+    return [values.get(h, "") for h in config.HEADERS]
 
 
 def run(argv: list[str] | None = None):
@@ -62,8 +72,9 @@ def run(argv: list[str] | None = None):
     ws = None
     if not dry_run:
         ws = sheet.open_worksheet()
-        for r in sheet.existing_rows(ws):
-            existing.add_sheet_row(r)
+        header, existing_values = sheet.existing_rows(ws)
+        for r in existing_values:
+            existing.add_sheet_row(r, header)
         before = len(leads)
         leads = [l for l in leads if existing.match(l) is None]
         print(f"[dedupe] {before - len(leads)} already in the sheet")
@@ -110,16 +121,19 @@ def run(argv: list[str] | None = None):
             seen[k] = today
         state.save(seen)
 
-    by_type = Counter(l["business_type"] or "other" for l in kept)
+    by_emirate = Counter(l.get("emirate") or "Unknown" for l in kept)
+    by_stage = Counter(l.get("stage") or "Unknown" for l in kept)
     fz = Counter(l["zone"].code for l in kept if l["zone"])
+    new_uae = sum(1 for l in kept if l.get("new_to_uae") == "Yes")
     with_contact = sum(1 for l in kept if l["phone"] or l["email"])
-    with_site = sum(1 for l in kept if l["website"])
-    summary = (f"UAE telecom leads - {today}\n"
-               f"{len(rows)} new leads ({with_contact} with phone/email, {with_site} with website, "
-               f"{sum(fz.values())} in free zones) from {len(cands)} items\n"
-               + ", ".join(f"{k}: {v}" for k, v in by_type.most_common())
+    summary = (f"UAE market-entry leads - {today}\n"
+               f"{len(rows)} new companies ({new_uae} new to the UAE, {sum(fz.values())} in free zones, "
+               f"{with_contact} with phone/email) from {len(cands)} items\n"
+               "By stage: " + ", ".join(f"{k}: {v}" for k, v in by_stage.most_common()) + "\n"
+               "By emirate: " + ", ".join(f"{k}: {v}" for k, v in by_emirate.most_common())
                + (("\nFree zones: " + ", ".join(f"{k}: {v}" for k, v in fz.most_common())) if fz else "")
-               + "\n\n" + "\n".join(f"- {r[1]} ({r[4] or 'UAE'})" for r in rows[:15]))
+               + "\n\n" + "\n".join(f"- {l['company_name']} ({l.get('stage') or '?'}, {l.get('emirate') or 'UAE'})"
+                                     for l in kept[:20]))
     print(summary)
     if not dry_run and rows:
         notify.telegram(summary)

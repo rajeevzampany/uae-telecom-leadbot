@@ -173,6 +173,10 @@ class ListingSiteTests(unittest.TestCase):
         self.assertEqual(out["phone"], "+971 4 555 6666")
 
 
+def row(values):
+    return dict(zip(config.HEADERS, values))
+
+
 def _lead(name, url="https://x.com/a", conf=0.8, **kw):
     base = {"company_name": name, "business_type": "cafe", "location": "", "website": "", "phone": "",
             "email": "", "confidence": conf, "free_zone_hint": "",
@@ -210,7 +214,9 @@ class DedupeTests(unittest.TestCase):
     def test_match_on_site_phone_email(self):
         from leadbot import dedupe
         idx = dedupe.Index()
-        idx.add_sheet_row(["2026-10-01", "Brew Bloom", "+971 4 321 7788", "hi@brew.ae", "", "https://brew.ae", "", ""])
+        old_layout = ["DATE", "COMPANY NAME", "CONTACT NUMBER", "EMAIL", "LOCATION", "WEBSITE", "SOURCE", "FREE ZONE"]
+        idx.add_sheet_row(["2026-10-01", "Brew Bloom", "+971 4 321 7788", "hi@brew.ae", "", "https://brew.ae", "", ""],
+                          old_layout)
         self.assertIsNotNone(idx.match(_lead("Totally Different", website="www.brew.ae/contact")))
         self.assertIsNotNone(idx.match(_lead("Other Name", phone="04 321 7788")))
         self.assertIsNotNone(idx.match(_lead("Third", email="HI@brew.ae")))
@@ -230,7 +236,7 @@ class DedupeTests(unittest.TestCase):
                '"free_zone":"","website":"","phone":"","email":"","confidence":0.8}]')
         rows = PipelineTest()._run(rss, llm)
         self.assertEqual(len(rows), 1)
-        self.assertIn("also in: Google News: Gulf News", rows[0][6])
+        self.assertIn("also in: Google News: Gulf News", row(rows[0])["SOURCE"])
 
 
 class EnrichHelperTests(unittest.TestCase):
@@ -281,6 +287,42 @@ class EnrichHelperTests(unittest.TestCase):
         self.assertFalse(b.take())
 
 
+class MarketEntryTests(unittest.TestCase):
+    def test_normalisers(self):
+        self.assertEqual(extract.norm_stage("Opening soon"), "Opening soon")
+        self.assertEqual(extract.norm_stage("announced plans"), "Announced")
+        self.assertEqual(extract.norm_stage("opened last week"), "Recently opened")
+        self.assertEqual(extract.norm_yes_no("yes - first UAE store"), "Yes")
+        self.assertEqual(extract.norm_yes_no(""), "Unknown")
+        self.assertEqual(extract.norm_emirate("Al Ain"), "Abu Dhabi")
+        self.assertEqual(extract.norm_emirate("RAK"), "Ras Al Khaimah")
+        self.assertEqual(extract.norm_emirate("Mleiha, Sharjah"), "Sharjah")
+        self.assertEqual(extract.norm_emirate("somewhere"), "")
+
+    def test_queries_cover_all_emirates_and_arabic(self):
+        text = " ".join(config.NEWS_QUERIES)
+        for e in config.EMIRATES + ["Al Ain"]:
+            self.assertIn(f'"{e}"', text)
+        self.assertGreaterEqual(len(config.NEWS_QUERIES_AR), 10)
+        self.assertEqual(config.NEWS_WINDOW, "7d")
+
+    def test_market_fields_in_row(self):
+        from leadbot import main
+        rss = """<?xml version="1.0"?><rss><channel>
+<item><title>UK bakery chain Gail's to open first UAE store in Sharjah - Gulf News</title>
+<link>https://news.google.com/rss/articles/g1</link><description>x</description><source>Gulf News</source></item>
+</channel></rss>"""
+        llm = ('[{"item":1,"company_name":"Gail\'s Bakery","sector":"Bakery cafe","business_type":"cafe",'
+               '"stage":"Opening soon","expected_opening":"Q1 2027","new_to_uae":"Yes","origin":"UK",'
+               '"emirate":"Sharjah","location":"Aljada, Sharjah","free_zone":"","website":"","phone":"",'
+               '"email":"","confidence":0.9}]')
+        r = row(PipelineTest()._run(rss, llm)[0])
+        self.assertEqual(config.HEADERS[:3], ["DATE", "COMPANY NAME", "SECTOR"])
+        self.assertEqual((r["STAGE"], r["EXPECTED OPENING"], r["NEW TO UAE"], r["ORIGIN"], r["EMIRATE"]),
+                         ("Opening soon", "Q1 2027", "Yes", "UK", "Sharjah"))
+        self.assertEqual(r["SECTOR"], "Bakery cafe")
+
+
 FZ_RSS = """<?xml version="1.0"?><rss><channel>
 <item><title>DMCC welcomes Nordic Freight as it opens new office in JLT - WAM</title>
 <link>https://news.google.com/rss/articles/fz1</link>
@@ -314,12 +356,13 @@ class PipelineTest(unittest.TestCase):
         rows = self._run(RSS, llm)
         self.assertEqual(len(rows), 1)
         self.assertEqual(len(rows[0]), len(config.HEADERS))
-        date_, name, phone, email, loc, site, src, fz = rows[0]
-        self.assertEqual(name, "Brew & Bloom")
-        self.assertEqual(phone, "+971 4 321 7788")
-        self.assertEqual(loc, "Al Quoz, Dubai")
-        self.assertTrue(src.startswith("Google News: Khaleej Times | https://"))
-        self.assertEqual(fz, "")
+        r = row(rows[0])
+        self.assertEqual(r["COMPANY NAME"], "Brew & Bloom")
+        self.assertEqual(r["CONTACT NUMBER"], "+971 4 321 7788")
+        self.assertEqual(r["LOCATION"], "Al Quoz, Dubai")
+        self.assertEqual(r["EMIRATE"], "Dubai")
+        self.assertTrue(r["SOURCE"].startswith("Google News: Khaleej Times | https://"))
+        self.assertEqual(r["FREE ZONE"], "")
 
     def test_free_zone_lead(self):
         llm = ('[{"item":1,"company_name":"Nordic Freight","business_type":"office",'
@@ -327,7 +370,8 @@ class PipelineTest(unittest.TestCase):
                '"confidence":0.85}]')
         rows = self._run(FZ_RSS, llm)
         self.assertEqual(len(rows), 1)
-        _, name, _, _, loc, _, src, fz = rows[0]
+        r = row(rows[0])
+        loc, src, fz = r["LOCATION"], r["SOURCE"], r["FREE ZONE"]
         self.assertEqual(fz, "DMCC Free Zone")
         self.assertIn("(DMCC Free Zone)", loc)
         self.assertTrue(src.startswith("Free Zone: DMCC via Google News: WAM | https://"))
