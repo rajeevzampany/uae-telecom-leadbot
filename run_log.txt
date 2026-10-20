@@ -1,0 +1,38 @@
+=== UAE telecom lead bot | 2026-10-20 20:28 Dubai | dry_run=True ===
+[site] https://www.timeoutdubai.com/feed: disallowed by robots.txt - using search routes only
+[site] https://www.timeoutdubai.com/restaurants/feed: disallowed by robots.txt - using search routes only
+[site] https://www.timeoutabudhabi.com/feed: disallowed by robots.txt - using search routes only
+[site] https://www.timeoutabudhabi.com/restaurants/feed: disallowed by robots.txt - using search routes only
+[site] 0 opening articles from listing-site feeds
+[collect] 625 unique items from 119 searches/feeds
+[collect] 625 new items to review
+[ai] 64 qualified mentions
+[dedupe] 41 unique companies after merging repeats
+[lookup] 60 of 60 search lookups used
+[dry-run] wrote 41 rows to leads_preview.csv
+UAE market-entry leads - 2026-10-20
+41 new companies (4 new to the UAE, 2 in free zones, 14 with phone/email) from 625 items
+By stage: Recently opened: 22, Announced: 15, Opening soon: 4
+By emirate: Dubai: 23, Abu Dhabi: 13, Unknown: 2, Fujairah: 1, Sharjah: 1, Ras Al Khaimah: 1
+Free zones: DIC-IND: 1, DIFC: 1
+
+- State Street (Announced, Abu Dhabi)
+- Al Wathba Insurance (Recently opened, Dubai)
+- Joyalukkas (Opening soon, Dubai)
+- ROKA (Announced, Dubai)
+- Wellfit (Recently opened, Abu Dhabi)
+- Five Iron Golf Abu Dhabi (Opening soon, Abu Dhabi)
+- Keolis (Recently opened, Dubai)
+- Selling Sunset real estate agency (Recently opened, Dubai)
+- Al Sharqi Shipping (Recently opened, Dubai)
+- Abu Dhabi Islamic Bank (ADIB) (Recently opened, Abu Dhabi)
+- ENAV (Announced, Fujairah)
+- Nayara Dubai (Recently opened, Dubai)
+- Rhenus (Recently opened, Dubai)
+- Goanna Capital (Recently opened, Abu Dhabi)
+- Café François (Announced, Dubai)
+- AKA Sushi (Announced, Dubai)
+- NH Collection Dubai Ibn Battuta (Recently opened, Dubai)
+- IchiRyu Ramen House (Recently opened, Dubai)
+- Keanu's (Recently opened, Dubai)
+- Cyrano (Opening soon, Dubai)
