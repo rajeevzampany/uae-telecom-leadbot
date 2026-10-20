@@ -92,6 +92,35 @@ def _call_claude(user_text: str, system: str = SYSTEM, max_tokens: int = 4000) -
     return "".join(b.get("text", "") for b in resp.get("content", []) if b.get("type") == "text")
 
 
+_ARABIC = re.compile(r"[؀-ۿ]")
+
+NAMES_SYSTEM = """You convert UAE business names written in Arabic script to the English name the business uses
+(its official/brand name if well known, e.g. "الوثبة للتأمين" -> "Al Wathba Insurance", "إيناف" -> "ENAV";
+otherwise a standard transliteration). Reply with ONLY a JSON object mapping each number to the English name."""
+
+
+def english_names(leads: list[dict]) -> None:
+    """Give Arabic-script company names their English form (keeps the Arabic in brackets), so the
+    same company found in English and Arabic news is recognised as one."""
+    todo = [l for l in leads if _ARABIC.search(l["company_name"])]
+    if not todo:
+        return
+    prompt = "\n".join(f"{i}. {l['company_name']} ({l.get('sector') or l.get('business_type')}, "
+                       f"{l.get('location') or 'UAE'})" for i, l in enumerate(todo, 1))
+    try:
+        text = _call_claude(prompt, system=NAMES_SYSTEM, max_tokens=1500)
+        m = re.search(r"\{.*\}", text or "", re.S)
+        mapping = json.loads(m.group(0)) if m else {}
+    except Exception as e:
+        print(f"[ai] English names failed: {e}")
+        return
+    for i, l in enumerate(todo, 1):
+        en = str(mapping.get(str(i), "")).strip()
+        if en and not _ARABIC.search(en):
+            l["name_ar"] = l["company_name"]
+            l["company_name"] = en
+
+
 def extract_leads(cands: list[Candidate]) -> list[dict]:
     leads = []
     for start in range(0, len(cands), config.BATCH_SIZE):

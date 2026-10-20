@@ -288,6 +288,22 @@ class EnrichHelperTests(unittest.TestCase):
 
 
 class MarketEntryTests(unittest.TestCase):
+    def test_arabic_and_english_mentions_merge(self):
+        from leadbot import dedupe
+        a = _lead("Al Wathba Insurance", "https://zawya.com/a", 0.9, location="Al Barsha, Dubai")
+        b = _lead("الوثبة للتأمين", "https://25h.ae/b", 0.8, location="Al Barsha South, Dubai")
+        with mock.patch("leadbot.extract._call_claude", return_value='{"1": "Al Wathba Insurance"}'):
+            extract.english_names([a, b])
+        self.assertEqual(b["company_name"], "Al Wathba Insurance")
+        self.assertEqual(b["name_ar"], "الوثبة للتأمين")
+        self.assertEqual(len(dedupe.merge_within([a, b])), 1)
+
+    def test_english_names_failure_keeps_original(self):
+        b = _lead("إيناف", "https://annahar.com/x")
+        with mock.patch("leadbot.extract._call_claude", side_effect=RuntimeError("down")):
+            extract.english_names([b])
+        self.assertEqual(b["company_name"], "إيناف")
+
     def test_normalisers(self):
         self.assertEqual(extract.norm_stage("Opening soon"), "Opening soon")
         self.assertEqual(extract.norm_stage("announced plans"), "Announced")

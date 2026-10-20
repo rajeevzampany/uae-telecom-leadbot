@@ -6,7 +6,7 @@ from datetime import datetime
 
 from . import config, dedupe, freezones, notify, search, sheet, sources, state
 from .enrich import enrich
-from .extract import extract_leads
+from .extract import english_names, extract_leads
 
 
 def tag_free_zone(lead: dict):
@@ -34,7 +34,8 @@ def build_row(today: str, lead: dict, zone) -> list[str]:
         source += f" | verify: {zone.verify_url}"
     emirate = lead.get("emirate") or (zone.emirate if zone else "")
     values = {
-        "DATE": today, "COMPANY NAME": lead["company_name"],
+        "DATE": today,
+        "COMPANY NAME": lead["company_name"] + (f" ({lead['name_ar']})" if lead.get("name_ar") else ""),
         "SECTOR": lead.get("sector") or (lead.get("business_type") or "").title(),
         "STAGE": lead.get("stage", ""), "EXPECTED OPENING": lead.get("expected_opening", ""),
         "NEW TO UAE": lead.get("new_to_uae", "Unknown"), "ORIGIN": lead.get("origin", ""),
@@ -63,7 +64,8 @@ def run(argv: list[str] | None = None):
     leads = extract_leads(cands) if cands else []
     print(f"[ai] {len(leads)} qualified mentions")
 
-    # 1) the same company found by several searches/articles -> one lead
+    # 1) the same company found by several searches/articles (English or Arabic) -> one lead
+    english_names(leads)
     leads = dedupe.merge_within(leads)
     print(f"[dedupe] {len(leads)} unique companies after merging repeats")
 
