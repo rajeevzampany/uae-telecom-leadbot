@@ -32,7 +32,9 @@ jobs:
       - run: pip install -r requirements.txt
 
       - name: Find and store leads
-        run: python -m leadbot ${{ inputs.dry_run && '--dry-run' || '' }}
+        run: |
+          set -o pipefail
+          python -u -m leadbot ${{ inputs.dry_run && '--dry-run' || '' }} 2>&1 | tee run_log.txt
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
@@ -62,6 +64,19 @@ jobs:
         with:
           name: leads-preview
           path: leads_preview.csv
+
+      - name: Save test results to the test-results branch
+        if: ${{ inputs.dry_run }}
+        run: |
+          mkdir -p /tmp/results && cp leads_preview.csv run_log.txt /tmp/results/
+          git config user.name "leadbot"
+          git config user.email "leadbot@users.noreply.github.com"
+          git checkout --orphan test-results
+          git rm -rq --cached . && git clean -fdxq
+          cp /tmp/results/* .
+          git add -f leads_preview.csv run_log.txt
+          git commit -qm "test run $(date -u +%F_%H%M)"
+          git push -f origin test-results
 
       - name: Save processed-items state
         if: ${{ !inputs.dry_run }}
