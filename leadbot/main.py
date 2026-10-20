@@ -83,8 +83,11 @@ def run(argv: list[str] | None = None):
     # 3) enrich, then de-duplicate again on website / phone / email
     budget = search.Budget(config.MAX_LOOKUPS)
     kept, kept_idx = [], dedupe.Index()
+    n_news = sum(1 for l in leads if "news.google." in l["source"].url)
     for lead in leads:
-        lead = enrich(lead, budget)
+        if "news.google." in lead["source"].url:
+            n_news -= 1
+        lead = enrich(lead, budget, reserve=n_news)
         if existing.match(lead) is not None:
             print(f"[dedupe] {lead['company_name']} matches a sheet row after enrichment")
             continue

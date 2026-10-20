@@ -110,7 +110,8 @@ def find_website(lead: dict, budget: search.Budget) -> str:
     return ""
 
 
-def enrich(lead: dict, budget: search.Budget | None = None) -> dict:
+def enrich(lead: dict, budget: search.Budget | None = None, reserve: int = 0) -> dict:
+    """reserve = lookups to keep for later leads' article reads (website search is lower priority)."""
     budget = budget or search.Budget(0)
     src = lead["source"]
 
@@ -156,7 +157,7 @@ def enrich(lead: dict, budget: search.Budget | None = None) -> dict:
     if website and not is_official_site(website, lead["company_name"]) and \
             any(b in website for b in NOT_OFFICIAL):
         website = ""                                   # e.g. an Instagram link isn't a website
-    if not website and search.available():
+    if not website and search.available() and budget.left > reserve:
         website = find_website(lead, budget)
 
     # 4) official website's homepage + contact page

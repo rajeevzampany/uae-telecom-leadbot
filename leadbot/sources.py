@@ -144,22 +144,29 @@ def web(query: str) -> list[Candidate]:
             for r in search.web_search(query, count=20, freshness=config.WEB_FRESHNESS)]
 
 
+def _interleave(groups: list[list[Candidate]]) -> list[Candidate]:
+    """Round-robin across queries, so a candidate cap never drops whole emirates or languages."""
+    out, i = [], 0
+    while any(i < len(g) for g in groups):
+        out += [g[i] for g in groups if i < len(g)]
+        i += 1
+    return out
+
+
 def collect() -> list[Candidate]:
-    # Order matters for de-duplication: routes with the publisher's real URL (site feeds,
-    # search APIs) come before Google News, whose links are redirects that can't be read in full.
-    items: list[Candidate] = site_feeds()
-    print(f"[site] {len(items)} opening articles from listing-site feeds")
+    groups: list[list[Candidate]] = [site_feeds()]
+    print(f"[site] {len(groups[0])} opening articles from listing-site feeds")
 
     # Brave is an official search API, so it's preferred when both keys exist
     if search.available():
         n_err = 0
-        for q in config.WEB_QUERIES:
+        for i, q in enumerate(config.WEB_QUERIES):
             try:
-                items += web(q)
+                groups.append(web(q))
             except Exception as e:
                 n_err += 1
                 print(f"[web] {q!r}: {e}")
-                if n_err >= 3 and n_err == config.WEB_QUERIES.index(q) + 1:
+                if n_err >= 3 and n_err == i + 1:
                     print("[web] first 3 searches all failed - stopping web searches for this run")
                     break
     else:
@@ -167,17 +174,18 @@ def collect() -> list[Candidate]:
 
     for q, lang in [(q, "en") for q in config.NEWS_QUERIES] + [(q, "ar") for q in config.NEWS_QUERIES_AR]:
         try:
-            items += google_news(q, lang)
+            groups.append(google_news(q, lang))
         except Exception as e:  # one bad feed shouldn't kill the run
             print(f"[news] {q!r}: {e}")
 
     # de-duplicate by URL and by near-identical headline (same story, many outlets)
     seen_keys, seen_titles, unique = set(), set(), []
-    for c in items:
+    for c in _interleave(groups):
         t = re.sub(r"\W+", "", re.split(r" [-|] ", c.title.lower())[0])[:60]
         if c.key in seen_keys or (t and t in seen_titles):
             continue
         seen_keys.add(c.key)
         seen_titles.add(t)
         unique.append(c)
+    print(f"[collect] {len(unique)} unique items from {len(groups)} searches/feeds")
     return unique
