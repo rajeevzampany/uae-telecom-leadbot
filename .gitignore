@@ -1,0 +1,11 @@
+# local test output - contains lead data, never commit
+leads_preview.csv
+*.csv
+
+# credentials
+.env
+*service-account*.json
+*credentials*.json
+
+__pycache__/
+*.pyc

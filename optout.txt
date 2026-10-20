@@ -1,0 +1,6 @@
+# Businesses that asked not to be contacted. One per line: company name, website domain,
+# phone number or email. The bot never adds a lead that matches any line.
+# Example:
+# Brew & Bloom Cafe
+# brewbloom.ae
+# +971 4 321 7788

@@ -1,0 +1,73 @@
+name: UAE Telecom Lead Bot
+
+on:
+  schedule:
+    - cron: "0 4 * * *"      # 04:00 UTC = 08:00 Asia/Dubai, every day
+  workflow_dispatch:          # "Run workflow" button for manual/test runs
+    inputs:
+      dry_run:
+        description: "Test run: don't touch the Google Sheet, save results as a downloadable CSV"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write             # to commit state/seen.json back
+
+concurrency:
+  group: leadbot
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Find and store leads
+        run: python -m leadbot ${{ inputs.dry_run && '--dry-run' || '' }}
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          SHEET_ID: ${{ secrets.SHEET_ID }}
+          SERPER_API_KEY: ${{ secrets.SERPER_API_KEY }}
+          BRAVE_API_KEY: ${{ secrets.BRAVE_API_KEY }}
+          RETENTION_DAYS: ${{ vars.RETENTION_DAYS || '0' }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+      - name: Show test results on the run page
+        if: ${{ inputs.dry_run }}
+        run: |
+          python - <<'EOF' >> "$GITHUB_STEP_SUMMARY"
+          import csv
+          rows = list(csv.reader(open("leads_preview.csv")))
+          print(f"## Test run: {len(rows) - 1} leads\n")
+          print("| " + " | ".join(rows[0]) + " |")
+          print("|" + "---|" * len(rows[0]))
+          for r in rows[1:]:
+              print("| " + " | ".join(c.replace("|", "/") for c in r) + " |")
+          EOF
+
+      - name: Upload test results
+        if: ${{ inputs.dry_run }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: leads-preview
+          path: leads_preview.csv
+
+      - name: Save processed-items state
+        if: ${{ !inputs.dry_run }}
+        run: |
+          git config user.name "leadbot"
+          git config user.email "leadbot@users.noreply.github.com"
+          git add state/seen.json
+          git diff --cached --quiet || git commit -m "state: $(date -u +%F)"
+          git push
