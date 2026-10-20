@@ -1,14 +1,12 @@
 """Collect raw candidate items from news (RSS) and social/web (search APIs)."""
 import hashlib
 import html
-import os
 import re
-import time
 import urllib.parse
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 
-from . import config, http
+from . import config, http, search
 
 _TAG = re.compile(r"<[^>]+>")
 
@@ -139,22 +137,10 @@ def expand_listing_articles(cands: list[Candidate]) -> int:
 
 
 # ---- Search APIs for social + open web (last 24h) ----------------------------
-def serper(query: str, key: str) -> list[Candidate]:
-    data = http.post_json("https://google.serper.dev/search",
-                          {"q": query, "gl": "ae", "hl": "en", "tbs": "qdr:d", "num": 20},
-                          {"X-API-KEY": key}, timeout=30, retries=1)
-    return [Candidate(clean(r.get("title", "")), clean(r.get("snippet", "")),
-                      r["link"], channel_for(r["link"]))
-            for r in data.get("organic", []) if r.get("link")]
-
-
-def brave(query: str, key: str) -> list[Candidate]:
-    q = urllib.parse.urlencode({"q": query, "country": "AE", "freshness": "pd", "count": 20})
-    data = http.get_json(f"https://api.search.brave.com/res/v1/web/search?{q}",
-                         {"X-Subscription-Token": key})
-    return [Candidate(clean(r.get("title", "")), clean(r.get("description", "")),
-                      r["url"], channel_for(r["url"]))
-            for r in data.get("web", {}).get("results", []) if r.get("url")]
+def web(query: str) -> list[Candidate]:
+    """Last-24h results from the configured search API (Brave preferred, Serper fallback)."""
+    return [Candidate(clean(r["title"]), clean(r["description"]), r["url"], channel_for(r["url"]))
+            for r in search.web_search(query, count=20, freshness="pd")]
 
 
 def collect() -> list[Candidate]:
@@ -164,17 +150,17 @@ def collect() -> list[Candidate]:
     print(f"[site] {len(items)} opening articles from listing-site feeds")
 
     # Brave is an official search API, so it's preferred when both keys exist
-    serper_key, brave_key = os.getenv("SERPER_API_KEY"), os.getenv("BRAVE_API_KEY")
-    if serper_key or brave_key:
+    if search.available():
+        n_err = 0
         for q in config.WEB_QUERIES:
             try:
-                if brave_key:
-                    items += brave(q, brave_key)
-                    time.sleep(1.1)          # Brave free tier: 1 request / second
-                else:
-                    items += serper(q, serper_key)
+                items += web(q)
             except Exception as e:
+                n_err += 1
                 print(f"[web] {q!r}: {e}")
+                if n_err >= 3 and n_err == config.WEB_QUERIES.index(q) + 1:
+                    print("[web] first 3 searches all failed - stopping web searches for this run")
+                    break
     else:
         print("[web] no SERPER_API_KEY / BRAVE_API_KEY set - social channels skipped")
 

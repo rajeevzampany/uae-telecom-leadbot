@@ -32,10 +32,31 @@ def parse_json_array(text: str) -> list[dict]:
     return [d for d in data if isinstance(d, dict)]
 
 
-def _call_claude(user_text: str) -> str:
+DETAIL_SYSTEM = """You read one news article and extract facts about ONE named UAE business from it.
+Use ONLY what the article states about that business - never guess, never use the publisher's or another venue's details.
+Reply with ONLY a JSON object:
+{"location": "most specific address/area + emirate, e.g. 'Gate Village 3, DIFC, Dubai' or ''", "free_zone": "UAE free zone name if the premises is in one, else ''", "website": "", "phone": "", "email": ""}"""
+
+
+def details_from_article(company: str, article: str) -> dict:
+    try:
+        text = _call_claude(f"Business: {company}\n\nArticle:\n{article}", system=DETAIL_SYSTEM, max_tokens=400)
+    except Exception as e:
+        print(f"[ai] details for {company} failed: {e}")
+        return {}
+    m = re.search(r"\{.*\}", text or "", re.S)
+    try:
+        d = json.loads(m.group(0)) if m else {}
+    except json.JSONDecodeError:
+        return {}
+    return {k: str(v).strip() for k, v in d.items() if isinstance(v, (str, int, float)) and str(v).strip()} \
+        if isinstance(d, dict) else {}
+
+
+def _call_claude(user_text: str, system: str = SYSTEM, max_tokens: int = 4000) -> str:
     resp = http.post_json(
         "https://api.anthropic.com/v1/messages",
-        {"model": config.ANTHROPIC_MODEL, "max_tokens": 4000, "system": SYSTEM,
+        {"model": config.ANTHROPIC_MODEL, "max_tokens": max_tokens, "system": system,
          "messages": [{"role": "user", "content": user_text}]},
         {"x-api-key": os.environ["ANTHROPIC_API_KEY"], "anthropic-version": "2023-06-01"},
     )

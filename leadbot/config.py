@@ -21,6 +21,9 @@ OPTOUT_FILE = os.getenv("OPTOUT_FILE", "optout.txt")
 ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-haiku-5-5")
 MIN_CONFIDENCE = float(os.getenv("MIN_CONFIDENCE", "0.6"))
 BATCH_SIZE = 15                      # candidate items per LLM call
+# Max paid search calls per run spent on enrichment (finding the original article and the
+# official website: up to 2 per lead). Brave includes ~1,000 calls/month in its free credit.
+MAX_LOOKUPS = int(os.getenv("MAX_LOOKUPS", "40"))
 MAX_CANDIDATES = int(os.getenv("MAX_CANDIDATES", "200"))
 
 # Keep leads that have no phone/email after enrichment? (location/website may still help)

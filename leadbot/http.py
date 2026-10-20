@@ -56,7 +56,7 @@ def allowed_by_robots(url: str) -> bool:
             _, text = get(base + "/robots.txt", timeout=10)
             rp.parse(text.splitlines())
         except urllib.error.HTTPError as e:
-            if e.code in (401, 403):
+            if e.code in (401, 403, 405, 429):     # site blocks / throttles bots
                 rp.disallow_all = True
             else:                       # 404 etc. -> no robots rules
                 rp.allow_all = True
@@ -75,7 +75,11 @@ def polite_get(url: str, delay: float = 2.0, **kw):
 
 
 def get_json(url: str, headers: dict | None = None, timeout: int = 20) -> dict:
-    _, text = get(url, {"Accept": "application/json", **(headers or {})}, timeout)
+    try:
+        _, text = get(url, {"Accept": "application/json", **(headers or {})}, timeout)
+    except urllib.error.HTTPError as e:      # surface the API's own error message
+        detail = e.read().decode(errors="replace")[:300]
+        raise RuntimeError(f"HTTP {e.code}: {detail}") from None
     return json.loads(text)
 
 

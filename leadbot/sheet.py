@@ -94,11 +94,8 @@ def ensure_reference_tab(sh, gspread):
     ref.freeze(rows=1)
 
 
-def existing_keys(ws) -> tuple[set, set]:
-    rows = ws.get_all_values()[1:]
-    names = {norm_name(r[1]) for r in rows if len(r) > 1 and r[1]}
-    sites = {norm_site(r[5]) for r in rows if len(r) > 5 and r[5]} - {""}
-    return names, sites
+def existing_rows(ws) -> list[list[str]]:
+    return ws.get_all_values()[1:]
 
 
 def append(ws, rows: list[list[str]]):

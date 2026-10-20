@@ -173,6 +173,114 @@ class ListingSiteTests(unittest.TestCase):
         self.assertEqual(out["phone"], "+971 4 555 6666")
 
 
+def _lead(name, url="https://x.com/a", conf=0.8, **kw):
+    base = {"company_name": name, "business_type": "cafe", "location": "", "website": "", "phone": "",
+            "email": "", "confidence": conf, "free_zone_hint": "",
+            "source": sources.Candidate(name, "", url, sources.channel_for(url))}
+    base.update(kw)
+    return base
+
+
+class DedupeTests(unittest.TestCase):
+    def test_same_name_variants(self):
+        from leadbot.dedupe import same_name
+        n = sheet.norm_name
+        self.assertTrue(same_name(n("ROKA"), n("Roka Dubai")))
+        self.assertTrue(same_name(n("Cafe Bateel"), n("Bateel")))
+        self.assertTrue(same_name(n("Al Sharqi Trading LLC"), n("Al Sharqi")))
+        self.assertTrue(same_name(n("Milora Gold & Diamonds"), n("Milora Gold and Diamonds")))
+        self.assertFalse(same_name(n("Koi Garden"), n("Koi Kitchen")))
+        self.assertFalse(same_name(n("Gold Store"), n("Gold Souk Store")))    # generic words only
+        self.assertFalse(same_name(n("China Securities"), n("Dubai Securities")))
+
+    def test_merge_within_keeps_one_and_fills_fields(self):
+        from leadbot import dedupe
+        a = _lead("ROKA", "https://news.google.com/rss/articles/1", 0.9, location="Dubai")
+        b = _lead("Roka Dubai", "https://www.timeoutdubai.com/roka", 0.7,
+                  location="Palm West Beach, Dubai", phone="+971 4 111 2222")
+        c = _lead("Saffron Lane", "https://gulfnews.com/s", 0.8)
+        out = dedupe.merge_within([b, a, c])
+        self.assertEqual(len(out), 2)
+        roka = next(l for l in out if "roka" in l["company_name"].lower())
+        self.assertEqual(roka["company_name"], "ROKA")                    # highest confidence kept
+        self.assertEqual(roka["phone"], "+971 4 111 2222")                # filled from duplicate
+        self.assertEqual(roka["location"], "Palm West Beach, Dubai")      # more specific wins
+        self.assertEqual(len(roka["extra_sources"]), 1)
+
+    def test_match_on_site_phone_email(self):
+        from leadbot import dedupe
+        idx = dedupe.Index()
+        idx.add_sheet_row(["2026-10-01", "Brew Bloom", "+971 4 321 7788", "hi@brew.ae", "", "https://brew.ae", "", ""])
+        self.assertIsNotNone(idx.match(_lead("Totally Different", website="www.brew.ae/contact")))
+        self.assertIsNotNone(idx.match(_lead("Other Name", phone="04 321 7788")))
+        self.assertIsNotNone(idx.match(_lead("Third", email="HI@brew.ae")))
+        self.assertIsNotNone(idx.match(_lead("The Brew & Bloom Cafe")))
+        self.assertIsNone(idx.match(_lead("Saffron Lane")))
+
+    def test_pipeline_merges_repeats_into_one_row(self):
+        from leadbot import main
+        rss = """<?xml version="1.0"?><rss><channel>
+<item><title>ROKA opens on the Palm - Time Out Dubai</title><link>https://news.google.com/rss/articles/r1</link>
+<description>x</description><source>Time Out Dubai</source></item>
+<item><title>Japanese restaurant Roka arrives in Dubai - Gulf News</title><link>https://news.google.com/rss/articles/r2</link>
+<description>y</description><source>Gulf News</source></item></channel></rss>"""
+        llm = ('[{"item":1,"company_name":"ROKA","business_type":"restaurant","location":"The Palm, Dubai",'
+               '"free_zone":"","website":"","phone":"","email":"","confidence":0.9},'
+               '{"item":2,"company_name":"Roka Dubai","business_type":"restaurant","location":"Dubai",'
+               '"free_zone":"","website":"","phone":"","email":"","confidence":0.8}]')
+        rows = PipelineTest()._run(rss, llm)
+        self.assertEqual(len(rows), 1)
+        self.assertIn("also in: Google News: Gulf News", rows[0][6])
+
+
+class EnrichHelperTests(unittest.TestCase):
+    def test_clean_location(self):
+        from leadbot.enrich import clean_location
+        self.assertEqual(clean_location("Dubai, Dubai"), "Dubai")
+        self.assertEqual(clean_location("Gate Village, DIFC, Dubai, UAE"), "Gate Village, DIFC, Dubai")
+
+    def test_official_site(self):
+        from leadbot.enrich import is_official_site
+        self.assertTrue(is_official_site("https://www.rokarestaurant.com/dubai", "ROKA"))
+        self.assertTrue(is_official_site("https://milora.ae", "Milora Gold & Diamonds"))
+        self.assertTrue(is_official_site("https://www.koi-garden.ae", "Koi Garden"))
+        self.assertFalse(is_official_site("https://www.timeoutdubai.com/roka", "ROKA"))
+        self.assertFalse(is_official_site("https://www.instagram.com/roka", "ROKA"))
+        self.assertFalse(is_official_site("https://www.goldstore.ae", "Gold Store"))   # generic name
+        self.assertFalse(is_official_site("https://www.unrelated.com", "Saffron Lane"))
+
+    def test_article_lookup_and_website(self):
+        from leadbot import enrich as en, search
+        lead = _lead("Koi Garden", "https://news.google.com/rss/articles/k1", location="Dubai")
+        lead["source"].title = "Koi Garden opens in DIFC - Gulf News"
+        article = ("<body><article>" + "Intro text about Dubai dining. " * 20 +
+                   "Koi Garden is now open at Gate Village 3, DIFC. Call 04 555 6666.</article></body>")
+        searches = [
+            [{"title": "Koi Garden opens in DIFC", "url": "https://gulfnews.com/koi", "description": "d"}],
+            [{"title": "Koi Garden - Home", "url": "https://www.koigarden.ae/menu", "description": "d"},
+             {"title": "Koi on Instagram", "url": "https://instagram.com/koi", "description": "d"}],
+        ]
+        def fake_get(url, **kw):
+            return ("u", article) if "gulfnews" in url else None
+        with mock.patch.dict(os.environ, {"BRAVE_API_KEY": "k"}), \
+                mock.patch("leadbot.search.web_search", side_effect=searches), \
+                mock.patch("leadbot.http.polite_get", side_effect=fake_get), \
+                mock.patch("leadbot.extract.details_from_article",
+                           return_value={"location": "Gate Village 3, DIFC, Dubai", "free_zone": "DIFC"}):
+            out = en.enrich(lead, search.Budget(5))
+        self.assertEqual(out["article_url"], "https://gulfnews.com/koi")
+        self.assertEqual(out["location"], "Gate Village 3, DIFC, Dubai")
+        self.assertEqual(out["free_zone_hint"], "DIFC")
+        self.assertEqual(out["phone"], "+971 4 555 6666")
+        self.assertEqual(out["website"], "https://www.koigarden.ae")
+
+    def test_budget(self):
+        from leadbot import search
+        b = search.Budget(1)
+        self.assertTrue(b.take())
+        self.assertFalse(b.take())
+
+
 FZ_RSS = """<?xml version="1.0"?><rss><channel>
 <item><title>DMCC welcomes Nordic Freight as it opens new office in JLT - WAM</title>
 <link>https://news.google.com/rss/articles/fz1</link>

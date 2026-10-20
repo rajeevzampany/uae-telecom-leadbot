@@ -53,6 +53,20 @@ from public news/posts and links to the official register for a **manual** check
 directory link to the federal **National Economic Register** (licence status, issuing authority, issue date).
 If you need registry data at scale, ask the free zone / Ministry of Economy about an official data licence.
 
+### Contact lookup (needs BRAVE_API_KEY or SERPER_API_KEY)
+For each qualified lead the bot (a) finds the publisher's original article for Google News
+headlines and reads it in full — the AI then pulls the precise location, free zone and any
+contact details for that company; (b) searches for the official website, accepting only a domain
+that contains a distinctive word of the company name (never news, directories or social pages);
+(c) reads that website's homepage + contact page. Max `MAX_LOOKUPS` (default 40) searches per run.
+
+### Duplicates
+One company = one row. Leads are treated as the same company when the name matches (also
+fuzzy: "ROKA" = "Roka Dubai", "Cafe Bateel" = "Bateel", legal suffixes ignored), or the website
+domain, email or phone number matches. Repeats found in the same run are merged into one row
+(blank fields filled from the others; SOURCE lists `also in: …`), and anything already in the
+sheet is skipped.
+
 ### Compliance features
 - Social platforms are read through search results only — no logins, no direct scraping.
 - robots.txt respected and ≥2 s between requests to any one website; honest bot user-agent.
