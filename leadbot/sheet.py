@@ -51,18 +51,64 @@ def is_opted_out(lead: dict, optouts: set[str]) -> bool:
 
 
 # ---- Google Sheets ---------------------------------------------------------------
-def open_worksheet():
+class SheetAccessError(RuntimeError):
+    """The Google Sheet can't be opened - message says exactly what to fix."""
+
+
+def _load_credentials() -> dict:
+    raw = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
+    if not raw:
+        raise SheetAccessError("GOOGLE_SERVICE_ACCOUNT_JSON secret is missing or empty. "
+                               "Add the service account's JSON key under Settings -> Secrets -> Actions.")
+    try:
+        creds = json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise SheetAccessError(f"GOOGLE_SERVICE_ACCOUNT_JSON is not valid JSON ({e}). "
+                               "Paste the whole downloaded key file, including the outer { }.") from None
+    if creds.get("type") != "service_account" or "client_email" not in creds:
+        raise SheetAccessError("GOOGLE_SERVICE_ACCOUNT_JSON is not a service-account key "
+                               "(expected \"type\": \"service_account\" and a client_email).")
+    return creds
+
+
+def open_spreadsheet():
+    """Log in as the service account and open the sheet, failing with an actionable message."""
     import gspread  # imported lazily so --dry-run works without it
 
-    creds = json.loads(os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"])
-    gc = gspread.service_account_from_dict(creds)
-    sh = gc.open_by_key(config.SHEET_ID)
+    if not config.SHEET_ID:
+        raise SheetAccessError("SHEET_ID secret is missing. Copy it from the sheet URL: "
+                               "docs.google.com/spreadsheets/d/<SHEET_ID>/edit")
+    creds = _load_credentials()
+    robot = creds["client_email"]
+    try:
+        gc = gspread.service_account_from_dict(creds)
+        return gc.open_by_key(config.SHEET_ID), gspread
+    except gspread.exceptions.SpreadsheetNotFound:
+        raise SheetAccessError(
+            f"Google says the sheet {config.SHEET_ID} doesn't exist or isn't shared with the bot. "
+            f"Open the sheet -> Share -> add {robot} as Editor, and check SHEET_ID matches the URL.") from None
+    except gspread.exceptions.APIError as e:
+        status = getattr(getattr(e, "response", None), "status_code", None)
+        if status == 403:
+            msg = str(e)
+            if "has not been used" in msg or "is disabled" in msg or "SERVICE_DISABLED" in msg:
+                raise SheetAccessError(
+                    "The Google Sheets API is turned off for the service account's Cloud project. "
+                    "Enable 'Google Sheets API' (and 'Google Drive API') in Google Cloud Console.") from None
+            raise SheetAccessError(f"Permission denied. Open the sheet -> Share -> add {robot} "
+                                   "as Editor (Viewer is not enough to write leads).") from None
+        raise
+
+
+def open_worksheet():
+    sh, gspread = open_spreadsheet()
     try:
         ws = sh.worksheet(config.WORKSHEET_NAME)
     except gspread.WorksheetNotFound:
         first = sh.sheet1
         head = first.row_values(1)
-        if not head or head == config.HEADERS[:len(head)]:
+        header_only = len(first.col_values(1)) <= 1      # nothing below the header row
+        if not head or header_only or head == config.HEADERS[:len(head)]:
             ws = first                      # adopt the empty / header-only first tab
             ws.update_title(config.WORKSHEET_NAME)
         else:

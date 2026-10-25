@@ -394,5 +394,59 @@ class PipelineTest(unittest.TestCase):
         self.assertIn("verify: https://dmcc.ae/business-directory", src)
 
 
+class SheetAccessTests(unittest.TestCase):
+    KEY = '{"type": "service_account", "client_email": "leadbot@proj.iam.gserviceaccount.com"}'
+
+    def _open(self, env, side_effect=None):
+        import gspread
+        with mock.patch.dict(os.environ, env, clear=False), \
+                mock.patch.object(config, "SHEET_ID", env.get("SHEET_ID", "")), \
+                mock.patch.object(gspread, "service_account_from_dict") as sa:
+            if side_effect:
+                sa.return_value.open_by_key.side_effect = side_effect
+            return sheet.open_spreadsheet()
+
+    def test_missing_key(self):
+        with self.assertRaisesRegex(sheet.SheetAccessError, "missing"):
+            self._open({"SHEET_ID": "abc", "GOOGLE_SERVICE_ACCOUNT_JSON": ""})
+
+    def test_bad_json(self):
+        with self.assertRaisesRegex(sheet.SheetAccessError, "not valid JSON"):
+            self._open({"SHEET_ID": "abc", "GOOGLE_SERVICE_ACCOUNT_JSON": "client_email: x"})
+
+    def test_missing_sheet_id(self):
+        with self.assertRaisesRegex(sheet.SheetAccessError, "SHEET_ID"):
+            self._open({"SHEET_ID": "", "GOOGLE_SERVICE_ACCOUNT_JSON": self.KEY})
+
+    def test_not_shared_names_robot_email(self):
+        import gspread
+        with self.assertRaises(sheet.SheetAccessError) as cm:
+            self._open({"SHEET_ID": "abc", "GOOGLE_SERVICE_ACCOUNT_JSON": self.KEY},
+                       side_effect=gspread.exceptions.SpreadsheetNotFound())
+        self.assertIn("leadbot@proj.iam.gserviceaccount.com", str(cm.exception))
+        self.assertIn("Editor", str(cm.exception))
+
+    def test_permission_denied_names_robot_email(self):
+        import gspread
+        resp = mock.Mock(status_code=403)
+        resp.json.return_value = {"error": {"code": 403, "message": "The caller does not have permission",
+                                            "status": "PERMISSION_DENIED"}}
+        with self.assertRaises(sheet.SheetAccessError) as cm:
+            self._open({"SHEET_ID": "abc", "GOOGLE_SERVICE_ACCOUNT_JSON": self.KEY},
+                       side_effect=gspread.exceptions.APIError(resp))
+        self.assertIn("leadbot@proj.iam.gserviceaccount.com", str(cm.exception))
+
+    def test_live_run_stops_before_searching(self):
+        from leadbot import main
+        with mock.patch.object(sheet, "open_worksheet",
+                               side_effect=sheet.SheetAccessError("share it")), \
+                mock.patch.object(sources, "collect") as collect, \
+                mock.patch("leadbot.notify.telegram") as tg:
+            with self.assertRaises(SystemExit):
+                main.run([])
+        collect.assert_not_called()           # no paid search / AI work on a broken sheet
+        tg.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()

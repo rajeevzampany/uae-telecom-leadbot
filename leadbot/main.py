@@ -53,6 +53,18 @@ def run(argv: list[str] | None = None):
     today = now.strftime("%Y-%m-%d")
     print(f"=== UAE telecom lead bot | {now:%Y-%m-%d %H:%M} Dubai | dry_run={dry_run} ===")
 
+    # Open the sheet BEFORE searching and AI calls: if it can't be written to, stop now
+    # instead of spending ~7 minutes of paid search/AI work that would be thrown away.
+    ws = None
+    if not dry_run:
+        try:
+            ws = sheet.open_worksheet()
+        except sheet.SheetAccessError as e:
+            print(f"[sheet] ERROR: {e}")
+            notify.telegram(f"UAE lead bot did not run today - Google Sheet problem:\n{e}")
+            sys.exit(1)
+        print(f"[sheet] connected to tab '{ws.title}'")
+
     seen = state.load()
     cands = [c for c in sources.collect() if c.key not in seen][: config.MAX_CANDIDATES]
     seen_keys = [c.key for c in cands]
@@ -71,9 +83,7 @@ def run(argv: list[str] | None = None):
 
     # 2) drop companies already in the sheet
     existing = dedupe.Index()
-    ws = None
     if not dry_run:
-        ws = sheet.open_worksheet()
         header, existing_values = sheet.existing_rows(ws)
         for r in existing_values:
             existing.add_sheet_row(r, header)
